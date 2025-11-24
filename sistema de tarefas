@@ -1,0 +1,257 @@
+# Aluno : Carlos Gabriel Raposo Landim
+
+
+import json
+from datetime import datetime
+from typing import List, Dict, Optional
+
+ARQUIVO_DADOS = "tarefas_dados.json"
+
+# -----------------------------
+# Utilidades e Persistência
+# -----------------------------
+def carregar() -> List[Dict]:
+    """Carrega a lista de tarefas do arquivo JSON, se existir."""
+    try:
+        with open(ARQUIVO_DADOS, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+        # Garantir que é uma lista
+        if isinstance(dados, list):
+            return dados
+        return []
+    except FileNotFoundError:
+        return []
+    except json.JSONDecodeError:
+        print("Aviso: arquivo de dados corrompido. Iniciando lista vazia.")
+        return []
+
+def salvar(tarefas: List[Dict]) -> None:
+    """Salva a lista de tarefas no arquivo JSON."""
+    with open(ARQUIVO_DADOS, "w", encoding="utf-8") as f:
+        json.dump(tarefas, f, ensure_ascii=False, indent=2)
+
+def gerar_proximo_id(tarefas: List[Dict]) -> int:
+    """Gera um ID incremental baseado nos existentes."""
+    return (max((t['id'] for t in tarefas), default=0) + 1)
+
+def validar_data(data_str: str) -> Optional[str]:
+    """Valida a data no formato dd/mm/aaaa. Retorna em ISO (aaaa-mm-dd) se válida."""
+    try:
+        dt = datetime.strptime(data_str, "%d/%m/%Y").date()
+        return dt.isoformat()
+    except ValueError:
+        return None
+
+def exibir_data_bonita(iso: Optional[str]) -> str:
+    if not iso:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(iso).date()
+        return dt.strftime("%d/%m/%Y")
+    except ValueError:
+        return "-"
+
+# -----------------------------
+# Operações CRUD
+# -----------------------------
+def cadastrar_tarefa(tarefas: List[Dict]) -> None:
+    print("\n=== Cadastrar Tarefa ===")
+    while True:
+        descricao = input("Descrição da tarefa: ").strip()
+        if descricao:
+            break
+        print("A descrição não pode ser vazia.")
+
+    while True:
+        prioridade_str = input("Prioridade (1 a 5, sendo 1=alta e 5=baixa) [padrão 3]: ").strip()
+        if prioridade_str == "":
+            prioridade = 3
+            break
+        if prioridade_str.isdigit() and 1 <= int(prioridade_str) <= 5:
+            prioridade = int(prioridade_str)
+            break
+        print("Informe um número entre 1 e 5 ou deixe em branco para 3.")
+
+    prazo_iso = None
+    prazo_str = input("Prazo (dd/mm/aaaa) [opcional]: ").strip()
+    if prazo_str:
+        prazo_iso = validar_data(prazo_str)
+        if not prazo_iso:
+            print("Data inválida. O prazo será deixado em branco.")
+            prazo_iso = None
+
+    tarefa = {
+        "id": gerar_proximo_id(tarefas),
+        "descricao": descricao,
+        "status": "Pendente",
+        "prioridade": prioridade,
+        "prazo": prazo_iso,
+        "criada_em": datetime.now().isoformat(timespec="seconds")
+    }
+    tarefas.append(tarefa)
+    salvar(tarefas)
+    print(f"Tarefa #{tarefa['id']} cadastrada com sucesso!")
+
+def listar_tarefas(tarefas: List[Dict], filtro: Optional[str] = None) -> None:
+    print("\n=== Listar Tarefas ===")
+    filtradas = tarefas
+    if filtro in {"Pendente", "Concluída"}:
+        filtradas = [t for t in tarefas if t["status"] == filtro]
+    elif filtro == "Atrasadas":
+        hoje = datetime.now().date()
+        filtradas = [t for t in tarefas if t["status"] == "Pendente" and t["prazo"] and datetime.fromisoformat(t["prazo"]).date() < hoje]
+    elif filtro == "Por prioridade":
+        filtradas = sorted(tarefas, key=lambda t: (t["prioridade"], t["prazo"] or ""))
+
+    if not filtradas:
+        print("Nenhuma tarefa para exibir.")
+        return
+
+    print(f"{'ID':<4} {'Descrição':<50} {'Status':<10} {'Prior.':<6} {'Prazo':<12}")
+    print("-"*90)
+    for t in filtradas:
+        print(f"{t['id']:<4} {t['descricao'][:50]:<50} {t['status']:<10} {t['prioridade']:<6} {exibir_data_bonita(t['prazo']):<12}")
+
+def selecionar_id(tarefas: List[Dict]) -> Optional[Dict]:
+    if not tarefas:
+        print("Não há tarefas cadastradas.")
+        return None
+    try:
+        id_busca = int(input("Informe o ID da tarefa: ").strip())
+    except ValueError:
+        print("ID inválido.")
+        return None
+    for t in tarefas:
+        if t["id"] == id_busca:
+            return t
+    print("Tarefa não encontrada.")
+    return None
+
+def atualizar_tarefa(tarefas: List[Dict]) -> None:
+    print("\n=== Atualizar/Editar Tarefa ===")
+    t = selecionar_id(tarefas)
+    if not t:
+        return
+
+    print(f"Editando tarefa #{t['id']} - {t['descricao']}")
+    nova_desc = input("Nova descrição (enter para manter): ").strip()
+    if nova_desc:
+        t["descricao"] = nova_desc
+
+    while True:
+        prioridade_str = input(f"Nova prioridade 1-5 (atual {t['prioridade']}) (enter p/ manter): ").strip()
+        if prioridade_str == "":
+            break
+        if prioridade_str.isdigit() and 1 <= int(prioridade_str) <= 5:
+            t["prioridade"] = int(prioridade_str)
+            break
+        print("Informe um número entre 1 e 5 ou deixe em branco para manter.")
+
+    prazo_str = input(f"Novo prazo dd/mm/aaaa (atual {exibir_data_bonita(t['prazo'])}) (enter p/ manter / limpar): ").strip()
+    if prazo_str == "":
+        pass  # mantém
+    elif prazo_str.lower() in {"-", "limpar", "x"}:
+        t["prazo"] = None
+    else:
+        novo = validar_data(prazo_str)
+        if novo:
+            t["prazo"] = novo
+        else:
+            print("Data inválida; prazo mantido.")
+
+    while True:
+        novo_status = input(f"Mudar status? (P = Pendente / C = Concluída / Enter = manter {t['status']}): ").strip().upper()
+        if novo_status == "":
+            break
+        if novo_status in {"P", "C"}:
+            t["status"] = "Pendente" if novo_status == "P" else "Concluída"
+            break
+        print("Opção inválida.")
+
+    salvar(tarefas)
+    print("Tarefa atualizada com sucesso!")
+
+def remover_tarefa(tarefas: List[Dict]) -> None:
+    print("\n=== Remover Tarefa ===")
+    t = selecionar_id(tarefas)
+    if not t:
+        return
+    confirma = input(f"Confirmar remoção da tarefa #{t['id']}? (s/N): ").strip().lower()
+    if confirma == "s":
+        tarefas.remove(t)
+        salvar(tarefas)
+        print("Tarefa removida.")
+    else:
+        print("Remoção cancelada.")
+
+# -----------------------------
+# Relatório
+# -----------------------------
+def gerar_relatorio(tarefas: List[Dict]) -> None:
+    print("\n=== Relatório ===")
+    total = len(tarefas)
+    concluidas = sum(1 for t in tarefas if t["status"] == "Concluída")
+    pendentes = total - concluidas
+    hoje = datetime.now().date()
+    atrasadas = sum(1 for t in tarefas if t["status"] == "Pendente" and t["prazo"] and datetime.fromisoformat(t["prazo"]).date() < hoje)
+    por_prior = {p: 0 for p in range(1, 6)}
+    for t in tarefas:
+        por_prior[t["prioridade"]] = por_prior.get(t["prioridade"], 0) + 1
+
+    taxa_conclusao = (concluidas / total * 100) if total else 0.0
+
+    print(f"Total de tarefas: {total}")
+    print(f"Concluídas: {concluidas}")
+    print(f"Pendentes: {pendentes}")
+    print(f"Atrasadas: {atrasadas}")
+    print(f"Taxa de conclusão: {taxa_conclusao:.1f}%")
+    print("Distribuição por prioridade:")
+    for p in range(1, 6):
+        print(f"  Prioridade {p}: {por_prior.get(p, 0)}")
+
+# -----------------------------
+# Menu e Loop Principal
+# -----------------------------
+def menu() -> None:
+    tarefas = carregar()
+    opcoes_listagem = {
+        "1": None,
+        "2": "Pendente",
+        "3": "Concluída",
+        "4": "Atrasadas",
+        "5": "Por prioridade",
+    }
+    while True:
+        print("\n===== SISTEMA DE TAREFAS =====")
+        print("1. Cadastrar tarefa")
+        print("2. Listar tarefas (todas)")
+        print("3. Listar pendentes")
+        print("4. Listar concluídas")
+        print("5. Listar atrasadas")
+        print("6. Listar por prioridade")
+        print("7. Atualizar/editar tarefa")
+        print("8. Remover tarefa")
+        print("9. Relatório")
+        print("0. Sair")
+
+        escolha = input("Escolha uma opção: ").strip()
+
+        if escolha == "1":
+            cadastrar_tarefa(tarefas)
+        elif escolha in {"2", "3", "4", "5", "6"}:
+            filtro = opcoes_listagem[str(int(escolha) - 1)]  # mapeia 2->None, 3->Pendente etc.
+            listar_tarefas(tarefas, filtro=filtro)
+        elif escolha == "7":
+            atualizar_tarefa(tarefas)
+        elif escolha == "8":
+            remover_tarefa(tarefas)
+        elif escolha == "9":
+            gerar_relatorio(tarefas)
+        elif escolha == "0":
+            print("Saindo... Até logo!")
+            break
+        else:
+            print("Opção inválida. Tente novamente.")
+
+if __name__ == "__main__":
+    menu()
